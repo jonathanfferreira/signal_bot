@@ -43,21 +43,35 @@ export interface AnalysisResult {
  * Calcula a Média Móvel Exponencial (EMA)
  */
 export function calculateEMA(prices: number[], period: number): number[] {
-  const ema: number[] = [];
+  if (period <= 0) {
+    throw new Error("O período da EMA deve ser maior que zero");
+  }
+
+  if (prices.length === 0) {
+    return [];
+  }
+
+  const ema: number[] = Array(prices.length).fill(Number.NaN);
+
+  if (prices.length < period) {
+    return ema;
+  }
+
   const multiplier = 2 / (period + 1);
-  
+
   // Primeira EMA é a média simples
   let sum = 0;
   for (let i = 0; i < period; i++) {
     sum += prices[i];
   }
   ema[period - 1] = sum / period;
-  
+
   // Calcular EMA para o resto
   for (let i = period; i < prices.length; i++) {
-    ema[i] = (prices[i] - ema[i - 1]) * multiplier + ema[i - 1];
+    const previous = Number.isFinite(ema[i - 1]) ? ema[i - 1] : ema[period - 1];
+    ema[i] = (prices[i] - previous) * multiplier + previous;
   }
-  
+
   return ema;
 }
 
@@ -65,34 +79,49 @@ export function calculateEMA(prices: number[], period: number): number[] {
  * Calcula o Índice de Força Relativa (RSI)
  */
 export function calculateRSI(prices: number[], period: number = 14): number[] {
-  const rsi: number[] = [];
-  const changes: number[] = [];
-  
-  // Calcular mudanças de preço
-  for (let i = 1; i < prices.length; i++) {
-    changes.push(prices[i] - prices[i - 1]);
+  if (period <= 0) {
+    throw new Error("O período do RSI deve ser maior que zero");
   }
-  
-  // Separar ganhos e perdas
-  const gains: number[] = changes.map(c => c > 0 ? c : 0);
-  const losses: number[] = changes.map(c => c < 0 ? -c : 0);
-  
-  // Calcular médias iniciais
-  let avgGain = gains.slice(0, period).reduce((a, b) => a + b, 0) / period;
-  let avgLoss = losses.slice(0, period).reduce((a, b) => a + b, 0) / period;
-  
-  // Primeiro RSI
-  let rs = avgGain / avgLoss;
-  rsi[period] = 100 - (100 / (1 + rs));
-  
-  // Calcular RSI para o resto
-  for (let i = period; i < changes.length; i++) {
-    avgGain = (avgGain * (period - 1) + gains[i]) / period;
-    avgLoss = (avgLoss * (period - 1) + losses[i]) / period;
-    rs = avgGain / avgLoss;
-    rsi[i + 1] = 100 - (100 / (1 + rs));
+
+  const rsi: number[] = Array(prices.length).fill(Number.NaN);
+
+  if (prices.length <= period) {
+    return rsi;
   }
-  
+
+  let gainSum = 0;
+  let lossSum = 0;
+
+  for (let i = 1; i <= period; i++) {
+    const change = prices[i] - prices[i - 1];
+    if (change >= 0) {
+      gainSum += change;
+    } else {
+      lossSum += Math.abs(change);
+    }
+  }
+
+  let avgGain = gainSum / period;
+  let avgLoss = lossSum / period;
+
+  rsi[period] = avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss);
+
+  for (let i = period + 1; i < prices.length; i++) {
+    const change = prices[i] - prices[i - 1];
+    const gain = change > 0 ? change : 0;
+    const loss = change < 0 ? Math.abs(change) : 0;
+
+    avgGain = (avgGain * (period - 1) + gain) / period;
+    avgLoss = (avgLoss * (period - 1) + loss) / period;
+
+    if (avgLoss === 0) {
+      rsi[i] = 100;
+    } else {
+      const rs = avgGain / avgLoss;
+      rsi[i] = 100 - 100 / (1 + rs);
+    }
+  }
+
   return rsi;
 }
 
@@ -104,21 +133,29 @@ export function calculateBBands(prices: number[], period: number = 20, stdDev: n
   middle: number[];
   lower: number[];
 } {
-  const middle: number[] = [];
-  const upper: number[] = [];
-  const lower: number[] = [];
-  
+  const middle: number[] = Array(prices.length).fill(Number.NaN);
+  const upper: number[] = Array(prices.length).fill(Number.NaN);
+  const lower: number[] = Array(prices.length).fill(Number.NaN);
+
+  if (period <= 0) {
+    throw new Error("O período das Bandas de Bollinger deve ser maior que zero");
+  }
+
+  if (prices.length < period) {
+    return { upper, middle, lower };
+  }
+
   for (let i = period - 1; i < prices.length; i++) {
     const slice = prices.slice(i - period + 1, i + 1);
     const mean = slice.reduce((a, b) => a + b, 0) / period;
     const variance = slice.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / period;
     const std = Math.sqrt(variance);
-    
+
     middle[i] = mean;
-    upper[i] = mean + (std * stdDev);
-    lower[i] = mean - (std * stdDev);
+    upper[i] = mean + std * stdDev;
+    lower[i] = mean - std * stdDev;
   }
-  
+
   return { upper, middle, lower };
 }
 
@@ -132,25 +169,40 @@ export function calculateMACD(prices: number[], fastPeriod: number = 12, slowPer
 } {
   const emaFast = calculateEMA(prices, fastPeriod);
   const emaSlow = calculateEMA(prices, slowPeriod);
-  
-  const macd: number[] = [];
+
+  const macd: number[] = Array(prices.length).fill(Number.NaN);
+
   for (let i = 0; i < prices.length; i++) {
-    if (emaFast[i] !== undefined && emaSlow[i] !== undefined) {
+    if (Number.isFinite(emaFast[i]) && Number.isFinite(emaSlow[i])) {
       macd[i] = emaFast[i] - emaSlow[i];
     }
   }
-  
-  const signal = calculateEMA(macd.filter(v => v !== undefined), signalPeriod);
-  const histogram: number[] = [];
-  
-  let signalIndex = 0;
+
+  const signal: number[] = Array(prices.length).fill(Number.NaN);
+  const histogram: number[] = Array(prices.length).fill(Number.NaN);
+
+  const macdValues: number[] = [];
+  const macdIndexes: number[] = [];
+
   for (let i = 0; i < macd.length; i++) {
-    if (macd[i] !== undefined && signal[signalIndex] !== undefined) {
-      histogram[i] = macd[i] - signal[signalIndex];
-      signalIndex++;
+    if (Number.isFinite(macd[i])) {
+      macdValues.push(macd[i]);
+      macdIndexes.push(i);
     }
   }
-  
+
+  const signalValues = macdValues.length > 0 ? calculateEMA(macdValues, signalPeriod) : [];
+
+  for (let i = 0; i < macdIndexes.length; i++) {
+    const originalIndex = macdIndexes[i];
+    const signalValue = signalValues[i];
+
+    if (Number.isFinite(signalValue)) {
+      signal[originalIndex] = signalValue;
+      histogram[originalIndex] = macd[originalIndex] - signalValue;
+    }
+  }
+
   return { macd, signal, histogram };
 }
 
@@ -181,10 +233,10 @@ export function analyzeAndGenerateSignal(
   const lastBbLower = bbands.lower[lastIndex];
   const lastBbMiddle = bbands.middle[lastIndex];
   const lastMacdHist = macd.histogram[lastIndex];
-  
+
   let pontosCall = 0;
   let pontosPut = 0;
-  
+
   const details: SignalDetails = {
     ema: "NEUTRO",
     rsi: "NEUTRO",
@@ -192,39 +244,39 @@ export function analyzeAndGenerateSignal(
     macd: "NEUTRO",
     longTermTrend
   };
-  
+
   // 1. EMA
-  if (lastEma9 > lastEma21) {
+  if (Number.isFinite(lastEma9) && Number.isFinite(lastEma21) && lastEma9 > lastEma21) {
     pontosCall++;
     details.ema = "CALL";
-  } else if (lastEma9 < lastEma21) {
+  } else if (Number.isFinite(lastEma9) && Number.isFinite(lastEma21) && lastEma9 < lastEma21) {
     pontosPut++;
     details.ema = "PUT";
   }
-  
+
   // 2. RSI
-  if (lastRsi > 50 && lastRsi < 70) {
+  if (Number.isFinite(lastRsi) && lastRsi > 50 && lastRsi < 70) {
     pontosCall++;
     details.rsi = "CALL";
-  } else if (lastRsi > 30 && lastRsi < 50) {
+  } else if (Number.isFinite(lastRsi) && lastRsi > 30 && lastRsi < 50) {
     pontosPut++;
     details.rsi = "PUT";
   }
-  
+
   // 3. BBANDS (Reversão)
-  if (close <= lastBbLower) {
+  if (Number.isFinite(lastBbLower) && close <= lastBbLower) {
     pontosCall++;
     details.bbands = "CALL";
-  } else if (close >= lastBbUpper) {
+  } else if (Number.isFinite(lastBbUpper) && close >= lastBbUpper) {
     pontosPut++;
     details.bbands = "PUT";
   }
-  
+
   // 4. MACD
-  if (lastMacdHist > 0) {
+  if (Number.isFinite(lastMacdHist) && lastMacdHist > 0) {
     pontosCall++;
     details.macd = "CALL";
-  } else if (lastMacdHist < 0) {
+  } else if (Number.isFinite(lastMacdHist) && lastMacdHist < 0) {
     pontosPut++;
     details.macd = "PUT";
   }
